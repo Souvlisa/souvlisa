@@ -53,11 +53,11 @@ def update_movie (id: int,
 ):
     for movie in movies :
         if movie ['id'] == id:
-            movie ['title'] == title
-            movie ['overview'] == overview
-            movie ['year'] == year
-            movie ['rating'] == rating
-            movie ['category'] == category
+            movie ['title'] = title
+            movie ['overview'] = overview
+            movie ['year'] = year
+            movie ['rating'] = rating
+            movie ['category'] = category
     return movies
 
 @app.delete('/movies/{id}', tags = ['movies'])
