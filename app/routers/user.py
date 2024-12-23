@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, security, status
 from app.schemas import User
 from fastapi.security.oauth2 import OAuth2PasswordRequestForm
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer, SecurityScopes
+from fastapi.testclient import TestClient
+from pydantic import BaseModel
 from jose import jwt 
-from typing import Annotated
-
+from typing import Annotated, Any
+import bcrypt
+from app.schemas import PyUser, LoginData, Token
+from datetime import datetime
 
 
 router = APIRouter(
@@ -14,11 +18,43 @@ router = APIRouter(
 
 Usuarios = []
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", scopes={'items': 'permissions to access items'})
 users = {
-    "lisa": {"username": "lisa", "email": "luisangelilozada@gmailcom", "password": "lisa25"},
-    "user2": {"username": "user2", "email": "user2@gmailcom", "password": "user2"}
+    "lisa": {"username": "lisa","role": "admin", "email": "luisangelilozada@gmailcom", "password": "lisa25", 'permissions': ['items:read', 'items:write', 'users:read', 'users:write']},
+    "user2": {"username": "user2","role": "user", "email": "user2@gmailcom", "password": "user2",'permissions': ['items:read']}
 }
+
+def authenticate_user(username: str, password: str) -> PyUser:
+    exception = HTTPException(
+                    status_code = status.HTTP_401_UNAUTHORIZED,
+                    detail='Invalid credentials'
+                )
+    for obj in users:
+        if obj['username'] == username:
+            if not bcrypt.checkpw(password.encode(), obj['password'].encode()):
+                raise exception
+            user = PyUser(**obj)
+            return user
+
+def get_current_user(
+    token: str = Depends(oauth2_scheme)
+) -> PyUser:
+    decoded = jwt.decode(token, 'secret', algorithms=['HS256'])
+    username = decoded['sub']
+    for obj in users:
+        if obj['username'] == username:
+            user = PyUser(**obj)
+            return user
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail='Invalid credentials'
+    )
+def create_token(user: PyUser) -> str:
+    payload = {'sub': user.username, 'iat': datetime.datetime.utcnow(),
+               'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=90)}
+    token = jwt.encode(payload, key='secret')
+    return token
+
 
 def encode_token (payload: dict)-> str:
     token = jwt .encode(payload, "my-secret", algorithm="HS256")
@@ -30,18 +66,20 @@ def decode_token(token: Annotated[str, Depends(oauth2_scheme)])-> dict:
     return user
 
 @router.post("/token")
-
-def login (form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
+def login(form_data: OAuth2PasswordRequestForm = Depends()):
     user = users.get(form_data.username)
-    if not user or form_data.password != user["password"] :
-        raise HTTPException(status_code = 400, detail="Incorrect username or password")
-    token = encode_token({"username": user["username"], "email": user["email"]} )
-    return { "access_token": token }
+    if not user or form_data.password != user["password"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Incorrect username or password"
+        )
+    token = encode_token(user)
+    return {"access_token": token, "token_type": "bearer"}
 
 @router.get("/profile")
 
-def profile (my_user: Annotated[dict, Depends(decode_token)]):
-    return my_user
+def get_user(current_user: PyUser = Depends(get_current_user)):
+    return current_user
 
 @router.get ('/')
 def obtener_usuarios():
